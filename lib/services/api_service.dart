@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/prediction_result.dart';
+import '../config/api_config.dart';
 
 class ApiService {
-  // IMPORTANT: Change this to your server's IP address
-  // For local development: Use your computer's local IP (e.g., 192.168.1.100)
-  // For production: Use your deployed server URL
-  static const String baseUrl = 'http://192.168.100.146:5000/api';
+  // Using ApiConfig for dynamic URL switching between local and production
+  // To switch environments, update isLocal in lib/config/api_config.dart
+  static String get baseUrl => '${ApiConfig.baseUrl}/api';
   
   final http.Client _client = http.Client();
 

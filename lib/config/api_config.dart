@@ -6,7 +6,7 @@ class ApiConfig {
   // PRODUCTION: Replace this with your deployed API URL after deployment
   // Example: 'https://accident-prediction-api-xxxx.onrender.com'
   // Example: 'https://your-app.up.railway.app'
-  static const String productionUrl = 'https://YOUR_DEPLOYED_URL_HERE';
+  static const String productionUrl = 'https://accident-prediction-api.onrender.com';
 
   // DEVELOPMENT: Localhost URLs for testing
   static const String localhostAndroid = 'http://10.0.2.2:5000'; // Android emulator
