@@ -1,3 +1,5 @@
+// Top-level build.gradle
+
 buildscript {
     ext.kotlin_version = '1.9.0'
     repositories {
@@ -8,6 +10,7 @@ buildscript {
     dependencies {
         classpath 'com.android.tools.build:gradle:8.1.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath "dev.flutter:flutter-gradle-plugin" // Flutter plugin
     }
 }
 
@@ -19,20 +22,6 @@ allprojects {
 }
 
 rootProject.buildDir = '../build'
-
-subprojects {
-    project.buildDir = "${rootProject.buildDir}/${project.name}"
-    
-    // Define flutter properties for all subprojects
-    ext {
-        flutter = [
-            compileSdkVersion: 35,
-            minSdkVersion: 21,
-            targetSdkVersion: 35,
-            ndkVersion: '25.1.8937393'
-        ]
-    }
-}
 
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
