@@ -1,8 +1,3 @@
-plugins {
-    id "com.android.application"
-    id "kotlin-android"
-}
-
 def localProperties = new Properties()
 def localPropertiesFile = rootProject.file('local.properties')
 if (localPropertiesFile.exists()) {
@@ -29,14 +24,17 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+// Set Flutter source directory before applying flutter.gradle
+project.ext.flutterSourceDir = '../..'
+
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
     namespace "com.example.accident_prone_app"
-    compileSdk flutter.compileSdkVersion
-    ndkVersion flutter.ndkVersion
+    compileSdk 35
+    ndkVersion "25.1.8937393"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
@@ -54,8 +52,8 @@ android {
 
     defaultConfig {
         applicationId "com.example.accident_prone_app"
-        minSdkVersion flutter.minSdkVersion
-        targetSdkVersion flutter.targetSdkVersion
+        minSdkVersion 21
+        targetSdkVersion 35
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
