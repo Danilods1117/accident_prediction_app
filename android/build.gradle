@@ -22,6 +22,16 @@ rootProject.buildDir = '../build'
 
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
+
+    // Provide flutter extension for plugins
+    project.ext {
+        flutter = [
+            compileSdkVersion: 35,
+            minSdkVersion    : 21,
+            targetSdkVersion : 35,
+            ndkVersion       : '25.1.8937393'
+        ]
+    }
 }
 
 subprojects {
