@@ -34,19 +34,6 @@ subprojects {
     }
 }
 
-// Apply compileSdk to all Android projects
-subprojects { project ->
-    project.plugins.whenPluginAdded { plugin ->
-        if (plugin.class.name.startsWith('com.android')) {
-            project.android {
-                if (compileSdkVersion == null) {
-                    compileSdkVersion 35
-                }
-            }
-        }
-    }
-}
-
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
