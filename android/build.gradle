@@ -22,14 +22,8 @@ rootProject.buildDir = '../build'
 
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
-}
-
-subprojects {
-    project.evaluationDependsOn(':app')
-}
-
-// Define flutter properties for all subprojects
-subprojects {
+    
+    // Define flutter properties for all subprojects
     ext {
         flutter = [
             compileSdkVersion: 35,
@@ -40,10 +34,10 @@ subprojects {
     }
 }
 
-// Ensure all plugins use compileSdk 35
-subprojects {
-    afterEvaluate { project ->
-        if (project.hasProperty('android')) {
+// Apply compileSdk to all Android projects
+subprojects { project ->
+    project.plugins.whenPluginAdded { plugin ->
+        if (plugin.class.name.startsWith('com.android')) {
             project.android {
                 if (compileSdkVersion == null) {
                     compileSdkVersion 35
