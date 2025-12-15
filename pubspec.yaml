@@ -46,6 +46,7 @@ dependencies:
 
   # Location services
   geolocator: ^10.1.0
+  geocoding: ^3.0.0
   permission_handler: ^11.1.0
 
   # Notifications

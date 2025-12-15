@@ -5,6 +5,7 @@ import '../models/location_data.dart';
 import '../models/prediction_result.dart';
 import 'api_service.dart';
 import 'notification_service.dart';
+import 'geocoding_service.dart';
 
 class LocationService extends ChangeNotifier {
   Position? _currentPosition;
@@ -13,14 +14,19 @@ class LocationService extends ChangeNotifier {
   bool _isTracking = false;
   bool _isLoading = false;
   String? _error;
-  
-  // Map of barangay names to approximate coordinates (simplified for demo)
-  // In production, use proper geocoding service
-  final Map<String, Map<String, dynamic>> _barangayCoordinates = {
-    'poblacion': {'lat': 16.0434, 'lng': 120.3328, 'station': 'dagupan'},
-    'lucao': {'lat': 16.0468, 'lng': 120.3406, 'station': 'dagupan'},
-    'pantal': {'lat': 16.0510, 'lng': 120.3442, 'station': 'dagupan'},
-    // Add more barangays as needed
+
+  // DEBUG MODE - Set to true to test notifications from home
+  bool _debugMode = kDebugMode; // Automatically true in debug builds
+
+  // Geocoding service for converting coordinates to addresses
+  final GeocodingService _geocodingService = GeocodingService();
+
+  // Test barangays for debug mode (only used when simulating)
+  final Map<String, Map<String, dynamic>> _testBarangayCoordinates = {
+    'poblacion': {'lat': 16.0434, 'lng': 120.3328, 'station': 'Dagupan City'},
+    'lucao': {'lat': 16.0468, 'lng': 120.3406, 'station': 'Dagupan City'},
+    'pantal': {'lat': 16.0510, 'lng': 120.3442, 'station': 'Dagupan City'},
+    // Add more test barangays as needed
   };
 
   // Getters
@@ -30,6 +36,10 @@ class LocationService extends ChangeNotifier {
   bool get isTracking => _isTracking;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  bool get debugMode => _debugMode;
+
+  // Get list of available barangays for testing
+  List<String> get availableBarangays => _testBarangayCoordinates.keys.toList();
 
   // Request location permissions
   Future<bool> requestPermissions() async {
@@ -100,6 +110,8 @@ class LocationService extends ChangeNotifier {
         desiredAccuracy: LocationAccuracy.high,
       );
 
+      // Note: getCurrentLocation doesn't have apiService parameter
+      // Will use geocoding only
       await _updateLocationData();
       
       _isLoading = false;
@@ -135,8 +147,8 @@ class LocationService extends ChangeNotifier {
       Geolocator.getPositionStream(locationSettings: locationSettings).listen(
         (Position position) async {
           _currentPosition = position;
-          await _updateLocationData();
-          
+          await _updateLocationData(apiService: apiService);
+
           // Check if location is accident-prone
           if (_currentLocationData?.barangay != null) {
             await _checkAndNotify(
@@ -146,7 +158,7 @@ class LocationService extends ChangeNotifier {
               _currentLocationData!.station ?? 'unknown',
             );
           }
-          
+
           notifyListeners();
         },
         onError: (error) {
@@ -169,35 +181,80 @@ class LocationService extends ChangeNotifier {
   }
 
   // Update location data based on current position
-  Future<void> _updateLocationData() async {
+  // Uses backend API first for accuracy, then falls back to geocoding
+  Future<void> _updateLocationData({ApiService? apiService}) async {
     if (_currentPosition == null) return;
 
-    // Find nearest barangay (simplified - in production use proper geocoding)
-    String? nearestBarangay;
-    String? nearestStation;
-    double minDistance = double.infinity;
+    String? barangay;
+    String? municipality;
+    String? station;
 
-    for (var entry in _barangayCoordinates.entries) {
-      double distance = Geolocator.distanceBetween(
+    try {
+      // Method 1: Try backend API first (most accurate for Pangasinan)
+      if (apiService != null) {
+        final nearestData = await apiService.findNearestBarangay(
+          _currentPosition!.latitude,
+          _currentPosition!.longitude,
+        );
+
+        if (nearestData != null && nearestData['barangay'] != null) {
+          barangay = nearestData['barangay'];
+          municipality = nearestData['municipality'];
+          station = nearestData['station'];
+          print('✓ Backend API found: $barangay, $municipality (${nearestData['distance']}m away)');
+        } else {
+          print('Backend API: No nearby barangay found');
+        }
+      }
+
+      // Method 2: Fall back to geocoding if backend didn't find anything
+      if (barangay == null) {
+        print('Trying geocoding as fallback...');
+        final addressData = await _geocodingService.getAddressFromCoordinates(
+          _currentPosition!.latitude,
+          _currentPosition!.longitude,
+        );
+
+        barangay = addressData['barangay'];
+        municipality = addressData['municipality'];
+
+        // Get station name based on municipality
+        station = _geocodingService.getMunicipalityStation(municipality);
+
+        print('Geocoding result: Barangay: $barangay, Municipality: $municipality');
+      }
+
+      // Validate if location is in Pangasinan
+      bool isInPangasinan = _geocodingService.isInPangasinan(
         _currentPosition!.latitude,
         _currentPosition!.longitude,
-        entry.value['lat'],
-        entry.value['lng'],
       );
 
-      if (distance < minDistance && distance < 1000) { // Within 1km
-        minDistance = distance;
-        nearestBarangay = entry.key;
-        nearestStation = entry.value['station'];
+      if (!isInPangasinan) {
+        print('⚠️  Warning: Location is outside Pangasinan bounds');
       }
-    }
 
-    _currentLocationData = LocationData(
-      latitude: _currentPosition!.latitude,
-      longitude: _currentPosition!.longitude,
-      barangay: nearestBarangay,
-      station: nearestStation,
-    );
+      _currentLocationData = LocationData(
+        latitude: _currentPosition!.latitude,
+        longitude: _currentPosition!.longitude,
+        barangay: barangay,
+        station: station,
+      );
+
+      if (kDebugMode) {
+        print('Final location: Barangay: $barangay, Station: $station');
+      }
+    } catch (e) {
+      print('Error updating location data: $e');
+
+      // Fallback to basic location data without barangay info
+      _currentLocationData = LocationData(
+        latitude: _currentPosition!.latitude,
+        longitude: _currentPosition!.longitude,
+        barangay: null,
+        station: null,
+      );
+    }
   }
 
   // Check location and send notification if accident-prone
@@ -279,5 +336,71 @@ class LocationService extends ChangeNotifier {
     _isLoading = false;
     _error = null;
     notifyListeners();
+  }
+
+  // DEBUG: Toggle debug mode
+  void toggleDebugMode() {
+    _debugMode = !_debugMode;
+    notifyListeners();
+  }
+
+  // DEBUG: Simulate entering a barangay (for testing from home)
+  Future<void> simulateEnteringBarangay(
+    ApiService apiService,
+    NotificationService notificationService,
+    String barangayName,
+  ) async {
+    if (!_debugMode) {
+      print('Debug mode is disabled. Enable it first.');
+      return;
+    }
+
+    final barangayData = _testBarangayCoordinates[barangayName.toLowerCase()];
+    if (barangayData == null) {
+      _error = 'Barangay "$barangayName" not found in test data';
+      notifyListeners();
+      return;
+    }
+
+    print('====================================');
+    print('DEBUG: Simulating entering $barangayName');
+    print('Station: ${barangayData['station']}');
+    print('Coordinates: ${barangayData['lat']}, ${barangayData['lng']}');
+    print('====================================');
+
+    // Simulate position at barangay
+    _currentPosition = Position(
+      latitude: barangayData['lat'],
+      longitude: barangayData['lng'],
+      timestamp: DateTime.now(),
+      accuracy: 10.0,
+      altitude: 0.0,
+      heading: 0.0,
+      speed: 0.0,
+      speedAccuracy: 0.0,
+      altitudeAccuracy: 0.0,
+      headingAccuracy: 0.0,
+    );
+
+    _currentLocationData = LocationData(
+      latitude: barangayData['lat'],
+      longitude: barangayData['lng'],
+      barangay: barangayName.toLowerCase(),
+      station: barangayData['station'],
+    );
+
+    notifyListeners();
+
+    // Trigger notification check
+    print('Calling API to check if accident-prone...');
+    await _checkAndNotify(
+      apiService,
+      notificationService,
+      barangayName.toLowerCase(),
+      barangayData['station'],
+    );
+
+    print('DEBUG: Simulation complete for $barangayName');
+    print('====================================');
   }
 }

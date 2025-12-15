@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import '../services/location_service.dart';
 import '../services/api_service.dart';
@@ -7,6 +8,7 @@ import '../widgets/alert_card.dart';
 import '../widgets/safety_tips_card.dart';
 import 'map_screen.dart';
 import 'settings_screen.dart';
+import 'debug_test_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -502,6 +504,22 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         },
       ),
+      // Debug test button (only visible in debug mode)
+      floatingActionButton: kDebugMode
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const DebugTestScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.bug_report),
+              label: const Text('Test'),
+              backgroundColor: Colors.orange,
+            )
+          : null,
     );
   }
 

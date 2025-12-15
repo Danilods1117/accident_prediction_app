@@ -13,18 +13,30 @@ class ApiService {
   // Check if a location is accident-prone
   Future<PredictionResult?> checkLocation(String barangay, String station) async {
     try {
+      // IMPORTANT: Don't lowercase station - backend expects exact capitalization
+      final requestBody = {
+        'barangay': barangay.toLowerCase().trim(),
+        'station': station.trim(), // Keep original capitalization!
+      };
+
+      print('=== API REQUEST ===');
+      print('URL: $baseUrl/check_location');
+      print('Request body: $requestBody');
+
       final response = await _client.post(
         Uri.parse('$baseUrl/check_location'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'barangay': barangay.toLowerCase().trim(),
-          'station': station.toLowerCase().trim(),
-        }),
+        body: jsonEncode(requestBody),
       ).timeout(const Duration(seconds: 10));
+
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return PredictionResult.fromJson(data);
+        final result = PredictionResult.fromJson(data);
+        print('Parsed result: isAccidentProne=${result.isAccidentProne}, riskLevel=${result.riskLevel}');
+        return result;
       } else {
         print('Error: ${response.statusCode} - ${response.body}');
         return null;
@@ -102,14 +114,55 @@ class ApiService {
     bool accidentProneOnly = false,
   }) async {
     try {
+      print('=== FETCHING BARANGAY LIST ===');
+      print('URL: $baseUrl/barangay_list?accident_prone_only=$accidentProneOnly');
+
       final response = await _client.get(
         Uri.parse('$baseUrl/barangay_list?accident_prone_only=$accidentProneOnly'),
       ).timeout(const Duration(seconds: 10));
 
+      print('Response status: ${response.statusCode}');
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return List<Map<String, dynamic>>.from(data['barangays'] ?? []);
+        final barangays = List<Map<String, dynamic>>.from(data['barangays'] ?? []);
+
+        print('Received ${barangays.length} barangays from API');
+
+        // Show sample of what we received
+        if (barangays.isNotEmpty) {
+          print('Sample barangay data: ${barangays.first}');
+        }
+
+        // Normalize the data - backend uses 'name' field for barangay
+        final normalizedBarangays = barangays.map((b) {
+          // Create a copy with both 'barangay' and 'name' fields
+          return {
+            'barangay': b['name'] ?? b['barangay'] ?? 'Unknown',
+            'name': b['name'] ?? b['barangay'] ?? 'Unknown',
+            'station': b['station'],
+            'accident_count': b['total_accidents'] ?? b['accident_count'] ?? 0,
+            'fatal_accidents': b['fatal_accidents'] ?? 0,
+            'is_accident_prone': b['is_accident_prone'] ?? false,
+          };
+        }).toList();
+
+        // Filter out entries with "Unknown" names
+        final validBarangays = normalizedBarangays.where((b) {
+          final barangay = b['barangay'] as String?;
+          return barangay != null &&
+                 barangay.toLowerCase() != 'unknown' &&
+                 barangay.trim().isNotEmpty;
+        }).toList();
+
+        print('Valid barangays after normalization: ${validBarangays.length}');
+        if (validBarangays.isNotEmpty) {
+          print('Sample normalized: ${validBarangays.first}');
+        }
+
+        return validBarangays;
       } else {
+        print('Error: ${response.statusCode}');
         return [];
       }
     } catch (e) {
@@ -155,6 +208,43 @@ class ApiService {
     } catch (e) {
       print('Exception in getBarangaysByMunicipality: $e');
       return [];
+    }
+  }
+
+  // Find nearest barangay from GPS coordinates
+  Future<Map<String, String?>?> findNearestBarangay(double latitude, double longitude) async {
+    try {
+      print('=== FINDING NEAREST BARANGAY ===');
+      print('Coordinates: $latitude, $longitude');
+
+      final response = await _client.post(
+        Uri.parse('$baseUrl/find_nearest'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'latitude': latitude,
+          'longitude': longitude,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      print('Response status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        print('Nearest barangay: ${data['barangay']}, ${data['municipality']}');
+
+        return {
+          'barangay': data['barangay'] as String?,
+          'municipality': data['municipality'] as String?,
+          'station': data['station'] as String?,
+          'distance': data['distance']?.toString(),
+        };
+      } else {
+        print('Error: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      print('Exception in findNearestBarangay: $e');
+      return null;
     }
   }
 
