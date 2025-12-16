@@ -10,16 +10,20 @@ class ApiService {
   
   final http.Client _client = http.Client();
 
-  // Check if a location is accident-prone
+  // Check if a location is accident-prone using ML model
   Future<PredictionResult?> checkLocation(String barangay, String station) async {
     try {
       // IMPORTANT: Don't lowercase station - backend expects exact capitalization
       final requestBody = {
         'barangay': barangay.toLowerCase().trim(),
         'station': station.trim(), // Keep original capitalization!
+        'timestamp': DateTime.now().toIso8601String(), // Send current timestamp for ML model
+        // Optional: Add vehicle_type and weather when available
+        // 'vehicle_type': 'car',
+        // 'weather': 'clear',
       };
 
-      print('=== API REQUEST ===');
+      print('=== API REQUEST (ML Model) ===');
       print('URL: $baseUrl/check_location');
       print('Request body: $requestBody');
 

@@ -181,7 +181,7 @@ class LocationService extends ChangeNotifier {
   }
 
   // Update location data based on current position
-  // Uses backend API first for accuracy, then falls back to geocoding
+  // Uses LocationIQ geocoding for accurate location detection
   Future<void> _updateLocationData({ApiService? apiService}) async {
     if (_currentPosition == null) return;
 
@@ -190,39 +190,20 @@ class LocationService extends ChangeNotifier {
     String? station;
 
     try {
-      // Method 1: Try backend API first (most accurate for Pangasinan)
-      if (apiService != null) {
-        final nearestData = await apiService.findNearestBarangay(
-          _currentPosition!.latitude,
-          _currentPosition!.longitude,
-        );
+      // Get location using LocationIQ geocoding
+      print('Getting location from LocationIQ...');
+      final addressData = await _geocodingService.getAddressFromCoordinates(
+        _currentPosition!.latitude,
+        _currentPosition!.longitude,
+      );
 
-        if (nearestData != null && nearestData['barangay'] != null) {
-          barangay = nearestData['barangay'];
-          municipality = nearestData['municipality'];
-          station = nearestData['station'];
-          print('✓ Backend API found: $barangay, $municipality (${nearestData['distance']}m away)');
-        } else {
-          print('Backend API: No nearby barangay found');
-        }
-      }
+      barangay = addressData['barangay'];
+      municipality = addressData['municipality'];
 
-      // Method 2: Fall back to geocoding if backend didn't find anything
-      if (barangay == null) {
-        print('Trying geocoding as fallback...');
-        final addressData = await _geocodingService.getAddressFromCoordinates(
-          _currentPosition!.latitude,
-          _currentPosition!.longitude,
-        );
+      // Get station name based on municipality
+      station = _geocodingService.getMunicipalityStation(municipality);
 
-        barangay = addressData['barangay'];
-        municipality = addressData['municipality'];
-
-        // Get station name based on municipality
-        station = _geocodingService.getMunicipalityStation(municipality);
-
-        print('Geocoding result: Barangay: $barangay, Municipality: $municipality');
-      }
+      print('LocationIQ result: Barangay: $barangay, Municipality: $municipality, Station: $station');
 
       // Validate if location is in Pangasinan
       bool isInPangasinan = _geocodingService.isInPangasinan(

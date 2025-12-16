@@ -4,6 +4,7 @@ import joblib
 import json
 from datetime import datetime
 import os
+import numpy as np
 
 app = Flask(__name__)
 CORS(app)
@@ -18,155 +19,156 @@ with open('feature_names.json', 'r') as f:
 with open('model_metadata.json', 'r') as f:
     model_metadata = json.load(f)
 
-accident_prone_places_set = set([place.lower().strip() for place in accident_prone_data['places']])
-print(f"Loaded {len(accident_prone_places_set)} accident-prone areas")
+print(f"ML Model loaded - {len(feature_names)} features ready")
+print(f"Historical data: {accident_prone_data['total_places']} locations")
+
+def prepare_features(barangay, station, timestamp_str=None, vehicle_type=None, weather=None):
+    
+    # Parse timestamp or use current time
+    if timestamp_str:
+        try:
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        except:
+            dt = datetime.now()
+    else:
+        dt = datetime.now()
+
+    # Extract temporal features
+    month = dt.month
+    day_of_week = dt.weekday()
+    hour = dt.hour
+
+    # Normalize location inputs for feature matching
+    barangay_normalized = barangay.lower().strip().replace(' ', '_')
+    station_normalized = station.strip().replace(' ', '_')
+
+    # Create feature dictionary (all features start at 0)
+    features = {name: 0 for name in feature_names}
+
+    # Set temporal features
+    features['month'] = month
+    features['day_of_week'] = day_of_week
+    features['hour'] = hour
+    features['location_key'] = 0  # Composite key, typically encoded
+
+    # Set station (municipality) one-hot encoding
+    station_feature = f"Station_{station_normalized}"
+    if station_feature in features:
+        features[station_feature] = 1
+
+    # Set place of accident (barangay) one-hot encoding
+    place_feature = f"Place_of_Accident_{barangay_normalized}"
+    if place_feature in features:
+        features[place_feature] = 1
+
+    # Set vehicle type if provided
+    if vehicle_type:
+        vehicle_normalized = vehicle_type.lower().replace(' ', '_')
+        vehicle_feature = f"Vehicles_involved_{vehicle_normalized}"
+        if vehicle_feature in features:
+            features[vehicle_feature] = 1
+
+    # Set weather if provided
+    if weather:
+        weather_normalized = weather.lower().replace(' ', '_')
+        weather_feature = f"Weather_Condition_{weather_normalized}"
+        if weather_feature in features:
+            features[weather_feature] = 1
+
+    # All other features remain 0 (defaults for Offense, Severity, Driver Behavior, etc.)
+    # This represents "unknown" or "normal" conditions - typical for predictive scenarios
+
+    # Convert to numpy array in correct order
+    feature_vector = np.array([features[name] for name in feature_names]).reshape(1, -1)
+
+    return feature_vector
 
 @app.route('/api/check_location', methods=['POST'])
 def check_location():
-    """
-    Check if a barangay is accident-prone
-    Expected JSON: {"barangay": "poblacion", "station": "dagupan"}
-    """
+    
     try:
         data = request.json
         barangay = data.get('barangay', '').lower().strip()
         station = data.get('station', 'unknown').lower().strip()
+        timestamp_str = data.get('timestamp')
+        vehicle_type = data.get('vehicle_type')
+        weather = data.get('weather')
 
         if not barangay:
             return jsonify({'error': 'Barangay name is required'}), 400
 
-        # Create composite key: "barangay, station"
+        # ML MODEL PREDICTION
+        feature_vector = prepare_features(
+            barangay=barangay,
+            station=station,
+            timestamp_str=timestamp_str,
+            vehicle_type=vehicle_type,
+            weather=weather
+        )
+
+        ml_prediction = model.predict(feature_vector)[0]
+        ml_prediction_proba = model.predict_proba(feature_vector)[0]
+
+        ml_confidence = float(ml_prediction_proba[1])
+        is_accident_prone_ml = bool(ml_prediction == 1)
+
+        print(f"ML Prediction for {barangay}, {station}: {ml_confidence:.2%}")
+
+        # Get historical data for context
         location_key = f"{barangay}, {station}"
-
-        # Check using composite key
-        is_accident_prone = location_key in accident_prone_places_set
-
-        # Get accident statistics for the specific barangay + station combination
         stats = accident_prone_data.get('statistics', {}).get(location_key, {})
         accident_count = stats.get('total_accidents', 0)
         fatal_count = stats.get('fatal_accidents', 0)
         common_offense = stats.get('most_common_offense', 'Unknown')
-        
+
         # Calculate risk level
-        if is_accident_prone:
-            if fatal_count > 5:
-                risk_level = 'CRITICAL'
-                confidence = 0.92
-            else:
-                risk_level = 'HIGH'
-                confidence = 0.85
+        if ml_confidence >= 0.85:
+            risk_level = 'CRITICAL'
+        elif ml_confidence >= 0.70:
+            risk_level = 'HIGH'
+        elif ml_confidence >= 0.50:
+            risk_level = 'MEDIUM'
         else:
             risk_level = 'LOW'
-            confidence = 0.75
-        
-        # Create appropriate message
-        if is_accident_prone:
-            message = f"⚠️ WARNING: {barangay.upper()} is an accident-prone area with {accident_count} recorded incidents!"
-            if fatal_count > 0:
-                message += f" {fatal_count} fatal accidents recorded."
+
+        # Create message
+
+        if is_accident_prone_ml:
+            message = f"ML MODEL ALERT: {barangay.upper()} has {ml_confidence:.0%} predicted accident risk!"
+            if accident_count > 0:
+                message += f" Historical data shows {accident_count} recorded incidents"
+                if fatal_count > 0:
+                    message += f" ({fatal_count} fatal)"
+                message += "."
         else:
-            message = f"✓ {barangay.upper()} has low accident risk with {accident_count} incidents recorded."
-        
+            message = f"{barangay.upper()} appears safe - {ml_confidence:.0%} confidence in low risk."
+            if accident_count > 0:
+                message += f" (Note: {accident_count} historical incidents recorded)"
+
         response = {
             'barangay': barangay.title(),
             'station': station.title(),
-            'is_accident_prone': is_accident_prone,
+            'is_accident_prone': is_accident_prone_ml,
+            'ml_confidence': ml_confidence,
             'accident_count': accident_count,
             'fatal_accidents': fatal_count,
             'risk_level': risk_level,
-            'confidence': confidence,
+            'confidence': ml_confidence,
             'common_offense': common_offense,
             'message': message,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'prediction_method': 'machine_learning'
         }
-        
+
         return jsonify(response), 200
-        
+
     except Exception as e:
+        print(f"Error in check_location: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/safety_tips', methods=['GET'])
-def get_safety_tips():
-    """Get safety tips for accident-prone areas"""
-    risk_level = request.args.get('risk_level', 'HIGH')
-    
-    general_tips = [
-        "🚗 Reduce your speed and stay alert",
-        "👀 Watch for pedestrians, motorcycles, and tricycles",
-        "🌙 Use headlights even during daytime in high-risk areas",
-        "📱 Avoid using mobile phones while driving",
-        "⚡ Maintain safe distance from other vehicles",
-        "🛑 Obey all traffic signs and signals",
-        "☔ Drive extra carefully during rain",
-        "🚸 Be extra cautious near schools, markets, and residential areas"
-    ]
-    
-    critical_tips = [
-        "🚨 SLOW DOWN IMMEDIATELY - High accident zone",
-        "⚠️ Double check for cross traffic at intersections",
-        "👮 Follow speed limits strictly",
-        "🔦 Ensure all lights are working properly",
-        "🛣️ Consider alternative routes if possible"
-    ]
-    
-    if risk_level == 'CRITICAL':
-        tips = critical_tips + general_tips
-    else:
-        tips = general_tips
-    
-    return jsonify({'tips': tips, 'risk_level': risk_level}), 200
 
-@app.route('/api/alternative_routes', methods=['POST'])
-def get_alternative_routes():
-    """Suggest alternative routes"""
-    data = request.json
-    current_barangay = data.get('current_barangay', 'Unknown')
-    
-    # In production, this would integrate with Google Maps API
-    # For now, return generic suggestions
-    routes = [
-        {
-            'route_name': 'Provincial Road Route',
-            'description': 'Via main provincial highway',
-            'estimated_time': '15 mins',
-            'distance': '8.5 km',
-            'risk_level': 'LOW',
-            'recommended': True
-        },
-        {
-            'route_name': 'Bypass via National Highway',
-            'description': 'Longer but safer route',
-            'estimated_time': '20 mins',
-            'distance': '12.3 km',
-            'risk_level': 'LOW',
-            'recommended': True
-        },
-        {
-            'route_name': 'Direct Route',
-            'description': 'Fastest but through accident-prone area',
-            'estimated_time': '10 mins',
-            'distance': '6.2 km',
-            'risk_level': 'HIGH',
-            'recommended': False
-        }
-    ]
-    
-    return jsonify({
-        'current_barangay': current_barangay,
-        'routes': routes,
-        'note': 'Please drive carefully regardless of route chosen'
-    }), 200
-
-@app.route('/api/statistics', methods=['GET'])
-def get_statistics():
-    """Get overall statistics"""
-    return jsonify({
-        'total_places': accident_prone_data['total_places'],
-        'accident_prone_count': len(accident_prone_places_set),
-        'threshold': accident_prone_data['threshold'],
-        'model_accuracy': model_metadata['accuracy'],
-        'training_samples': model_metadata['training_samples']
-    }), 200
 
 @app.route('/api/barangay_list', methods=['GET'])
 def get_barangay_list():
@@ -250,64 +252,48 @@ def get_barangays_by_municipality():
     except Exception as e:
         return jsonify({'error': str(e), 'barangays': []}), 500
 
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """API health check"""
-    return jsonify({
-        'status': 'healthy',
-        'model_loaded': model is not None,
-        'model_type': model_metadata['model_type'],
-        'model_accuracy': model_metadata['accuracy'],
-        'accident_prone_areas_loaded': len(accident_prone_places_set),
-        'timestamp': datetime.now().isoformat()
-    }), 200
 
 @app.route('/', methods=['GET'])
 def home():
     """API information"""
     return jsonify({
-        'service': 'Accident Prone Area Prediction API',
-        'version': '1.0.0',
+        'service': 'Accident Prone Area Prediction API (ML-Powered)',
+        'version': '2.0.0',
+        'model': {
+            'type': model_metadata['model_type'],
+            'accuracy': model_metadata['accuracy'],
+            'features': len(feature_names)
+        },
         'endpoints': {
-            'POST /api/check_location': 'Check if a barangay is accident-prone',
-            'GET /api/safety_tips': 'Get safety tips',
-            'POST /api/alternative_routes': 'Get alternative routes',
-            'GET /api/statistics': 'Get overall statistics',
+            'POST /api/check_location': 'ML prediction for accident risk',
             'GET /api/barangay_list': 'Get list of all barangays',
             'GET /api/municipalities': 'Get list of municipalities',
             'GET /api/barangays': 'Get barangays by municipality',
-            'GET /api/health': 'Health check'
         }
     }), 200
 
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print("ACCIDENT PREDICTION API SERVER")
+    print("ACCIDENT PREDICTION API (ML-POWERED)")
     print("="*60)
-    print(f"\nModel Info:")
+    print(f"\nML Model:")
     print(f"   Type: {model_metadata['model_type']}")
     print(f"   Accuracy: {model_metadata['accuracy']:.2%}")
+    print(f"   Features: {len(feature_names)}")
     print(f"   Training samples: {model_metadata['training_samples']}")
-    print(f"\nLoaded Data:")
-    print(f"   Total places: {accident_prone_data['total_places']}")
-    print(f"   Accident-prone areas: {len(accident_prone_places_set)}")
-    print(f"\nAPI Endpoints:")
-    print("   - POST /api/check_location")
-    print("   - GET  /api/safety_tips")
-    print("   - POST /api/alternative_routes")
-    print("   - GET  /api/statistics")
+    print(f"\nData:")
+    print(f"   Total locations: {accident_prone_data['total_places']}")
+    print(f"\nEndpoints:")
+    print("   - POST /api/check_location (ML prediction)")
     print("   - GET  /api/barangay_list")
     print("   - GET  /api/municipalities")
     print("   - GET  /api/barangays")
-    print("   - GET  /api/health")
 
-    # Get port from environment variable (for production deployment)
     port = int(os.environ.get('PORT', 5000))
-    # Get debug mode from environment (default to False for production)
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
 
-    print(f"\nServer starting on http://0.0.0.0:{port}")
-    print(f"Debug mode: {debug_mode}")
+    print(f"\nServer: http://0.0.0.0:{port}")
+    print(f"Debug: {debug_mode}")
     print("="*60 + "\n")
 
     app.run(host='0.0.0.0', port=port, debug=debug_mode)

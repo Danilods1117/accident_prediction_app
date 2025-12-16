@@ -4,23 +4,121 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class GeocodingService {
-  // Google Maps API Key - Replace with your actual API key
-  static const String _googleMapsApiKey = 'AIzaSyAAcBU-SiCt024WRyGx0Z0uOnyj1E753EA';
+  // API Keys
+  static const String _googleMapsApiKey = 'AIzaSyBvFwOEQAoQfskpXwJMNiwVBZaCAvZuhJ8';
+  static const String _locationIQApiKey = 'pk.43a845cff14e4ce7e7e9ecf0ee53d695'; // Get free key from locationiq.com
 
-  // Set to true to use Google Maps API, false to use built-in geocoding
-  static const bool _useGoogleMapsAPI = true; // Change to true when you add your API key
+  // Geocoding provider selection
+  // Options: 'locationiq', 'google', 'builtin'
+  static const String _geocodingProvider = 'locationiq';
+
   // Convert coordinates to address (Reverse Geocoding)
   Future<Map<String, String?>> getAddressFromCoordinates(
     double latitude,
     double longitude,
   ) async {
-    // Use Google Maps API if enabled and API key is set
-    if (_useGoogleMapsAPI && _googleMapsApiKey != 'AIzaSyAAcBU-SiCt024WRyGx0Z0uOnyj1E753EA') {
-      return await _getAddressFromGoogleMaps(latitude, longitude);
-    }
+    // Choose geocoding provider
+    switch (_geocodingProvider) {
+      case 'locationiq':
+        print('📍 Using LocationIQ API for accurate geocoding');
+        return await _getAddressFromLocationIQ(latitude, longitude);
 
-    // Otherwise use built-in geocoding
-    return await _getAddressFromBuiltInGeocoding(latitude, longitude);
+      case 'google':
+        print('🗺️ Using Google Maps API for accurate geocoding');
+        return await _getAddressFromGoogleMaps(latitude, longitude);
+
+      case 'builtin':
+      default:
+        print('📍 Using built-in geocoding (less accurate)');
+        return await _getAddressFromBuiltInGeocoding(latitude, longitude);
+    }
+  }
+
+  // LocationIQ Geocoding API (FREE - 10,000 requests/day)
+  Future<Map<String, String?>> _getAddressFromLocationIQ(
+    double latitude,
+    double longitude,
+  ) async {
+    try {
+      print('=== LOCATIONIQ GEOCODING ===');
+      print('Lat: $latitude, Lng: $longitude');
+
+      final url = Uri.parse(
+        'https://us1.locationiq.com/v1/reverse?key=$_locationIQApiKey&lat=$latitude&lon=$longitude&format=json&accept-language=en',
+      );
+
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
+
+      print('Response status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        print('LocationIQ response: ${data.toString()}');
+
+        // LocationIQ returns address components in the 'address' field
+        final address = data['address'];
+
+        if (address != null) {
+          String? barangay;
+          String? municipality;
+          String? province;
+
+          // LocationIQ structure for Philippines:
+          // - suburb/neighbourhood/village = Barangay
+          // - city/town/municipality = Municipality
+          // - state = Province
+
+          barangay = address['suburb'] ??
+                     address['neighbourhood'] ??
+                     address['village'] ??
+                     address['hamlet'];
+
+          municipality = address['city'] ??
+                        address['town'] ??
+                        address['municipality'];
+
+          province = address['state'];
+
+          final formattedAddress = data['display_name'] as String?;
+
+          print('\n=== LOCATIONIQ RESULT ===');
+          print('Barangay: $barangay');
+          print('Municipality: $municipality');
+          print('Province: $province');
+          print('Full: $formattedAddress');
+
+          // Get station name
+          final station = getMunicipalityStation(municipality);
+
+          return {
+            'barangay': _cleanBarangayName(barangay),
+            'municipality': municipality,
+            'province': province,
+            'fullAddress': formattedAddress,
+            'station': station,
+          };
+        } else {
+          print('LocationIQ: No address data found');
+          return _createFallbackResult(latitude, longitude, 'No address data');
+        }
+      } else if (response.statusCode == 401) {
+        print('LocationIQ API error: Invalid API key');
+        print('Get your free API key from: https://locationiq.com/');
+        return _createFallbackResult(latitude, longitude, 'Invalid API key');
+      } else if (response.statusCode == 429) {
+        print('LocationIQ API error: Rate limit exceeded');
+        return _createFallbackResult(latitude, longitude, 'Rate limit exceeded');
+      } else {
+        print('HTTP Error: ${response.statusCode}');
+        print('Response: ${response.body}');
+        return _createFallbackResult(latitude, longitude, 'HTTP ${response.statusCode}');
+      }
+    } catch (e, stackTrace) {
+      print('LocationIQ API error: $e');
+      print('Stack trace: $stackTrace');
+      return _createFallbackResult(latitude, longitude, e.toString());
+    }
   }
 
   // Google Maps Geocoding API (more accurate)
